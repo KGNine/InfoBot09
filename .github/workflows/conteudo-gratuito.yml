@@ -2,9 +2,17 @@ name: "Conteudo gratuito no Telegram"
 
 on: {
   "schedule": [
-    {"cron": "0 10,15,21 * * *"}
+    {"cron": "0 10,12,14,16,18,20 * * *"}
   ],
-  "workflow_dispatch": {}
+  "workflow_dispatch": {
+    "inputs": {
+      "pilar": {
+        "description": "Indice do pilar para testar (0 a 5). Deixe vazio para automatico.",
+        "required": false,
+        "default": ""
+      }
+    }
+  }
 }
 
 jobs: {
@@ -18,7 +26,8 @@ jobs: {
         "name": "Rodar script",
         "env": {
           "TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}",
-          "TELEGRAM_CHAT_ID": "${{ secrets.TELEGRAM_CHAT_ID }}"
+          "TELEGRAM_CHAT_ID": "${{ secrets.TELEGRAM_CHAT_ID }}",
+          "FORCAR_PILAR": "${{ github.event.inputs.pilar }}"
         },
         "run": "python content_free.py"
       }
