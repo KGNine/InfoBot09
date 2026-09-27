@@ -5,14 +5,14 @@ from datetime import date, timedelta
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
-# Datas oficiais confirmadas (atualizar uma vez por ano, quando o calendário do ano seguinte sair)
+# Datas oficiais confirmadas (atualizar uma vez por ano)
 COPOM_2026 = [date(2026, 11, 4), date(2026, 12, 9)]
 FOMC_2026 = [date(2026, 10, 28), date(2026, 12, 9)]
 
 
 def primeira_sexta(ano, mes):
     d = date(ano, mes, 1)
-    while d.weekday() != 4:  # 4 = sexta-feira
+    while d.weekday() != 4:
         d += timedelta(days=1)
     return d
 
@@ -33,19 +33,19 @@ def montar_eventos(hoje, janela_dias=7):
 
     for d in COPOM_2026:
         if hoje <= d <= limite:
-            eventos.append((d, "🇧🇷 Decisão do Copom (Selic)"))
+            eventos.append((d, 5, "🇧🇷 Decisão do Copom (Selic)"))
 
     for d in FOMC_2026:
         if hoje <= d <= limite:
-            eventos.append((d, "🌍 Decisão do FOMC (juros EUA)"))
+            eventos.append((d, 5, "🌍 Decisão do FOMC (juros EUA)"))
 
     ipca = proximo_dia_aproximado(hoje, 10)
     if hoje <= ipca <= limite:
-        eventos.append((ipca, "🇧🇷 IPCA (inflação) — data estimada, confirme no IBGE"))
+        eventos.append((ipca, 4, "🇧🇷 IPCA (inflação) — data estimada, confirme no IBGE"))
 
     cpi = proximo_dia_aproximado(hoje, 13)
     if hoje <= cpi <= limite:
-        eventos.append((cpi, "🌍 CPI dos EUA (inflação) — data estimada, confirme no BLS"))
+        eventos.append((cpi, 4, "🌍 CPI dos EUA (inflação) — data estimada, confirme no BLS"))
 
     payroll = primeira_sexta(hoje.year, hoje.month)
     if payroll < hoje:
@@ -53,9 +53,10 @@ def montar_eventos(hoje, janela_dias=7):
         prox_ano = hoje.year if hoje.month < 12 else hoje.year + 1
         payroll = primeira_sexta(prox_ano, prox_mes)
     if hoje <= payroll <= limite:
-        eventos.append((payroll, "🌍 Payroll dos EUA (empregos)"))
+        eventos.append((payroll, 4, "🌍 Payroll dos EUA (empregos)"))
 
-    eventos.sort(key=lambda x: x[0])
+    # Ordena por importância (mais estrelas primeiro), depois por data
+    eventos.sort(key=lambda x: (-x[1], x[0]))
     return eventos
 
 
@@ -67,8 +68,9 @@ def montar_mensagem():
     if not eventos:
         linhas.append("Sem eventos relevantes previstos para os próximos 7 dias.")
     else:
-        for d, nome in eventos:
-            linhas.append(f"• {d.strftime('%d/%m')} — {nome}")
+        for d, estrelas, nome in eventos:
+            estrelas_txt = "⭐" * estrelas
+            linhas.append(f"{estrelas_txt} — {d.strftime('%d/%m')} — {nome}")
 
     return "\n".join(linhas)
 
