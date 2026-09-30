@@ -22,7 +22,6 @@ def buscar_novos_membros():
             if not membro.get("is_bot"):
                 nomes.append(membro.get("first_name", "novo membro"))
 
-    # Confirma o processamento — limpa a fila do lado do Telegram, evitando repetir
     if max_update_id is not None:
         requests.get(f"{BASE_URL}/getUpdates", params={"offset": max_update_id + 1}, timeout=15)
 
@@ -43,7 +42,9 @@ def montar_boas_vindas(nomes):
         "🪙 Cripto Pulse • 🇧🇷 Termômetro BR • 🌍 Giro Global\n"
         "📈 Sala de Trade • 🤖 Radar IA • 🌦️ Clima & Mercado\n\n"
         "Fique à vontade pra explorar o histórico de mensagens fixadas. "
-        "Bons investimentos! 📊"
+        "Bons investimentos! 📊\n\n"
+        "📲 Siga também: [Instagram](https://instagram.com/kaue9oncalves) • "
+        "[X](https://x.com/kaue9oncalves)"
     )
 
 
