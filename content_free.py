@@ -1,10 +1,13 @@
 import os
+import re
+import html
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 LAT, LON = -31.77, -52.34  # Pelotas/RS
 
@@ -17,14 +20,7 @@ PILARES = [
     {"nome": "🌦️ Clima & Mercado", "tipo": "clima", "idioma": "pt"},
 ]
 
-# Hora em UTC -> indice do pilar em PILARES
 HORARIOS_UTC = {10: 0, 12: 1, 14: 2, 16: 3, 18: 4, 20: 5}
-
-CAMPANHAS_VIP = [
-    "Isso é só a manchete. No VIP, a gente te diz o que fazer com essa informação — antes que o mercado já tenha precificado.",
-    "Quem está no grupo VIP já recebeu a leitura completa disso, com o ativo mais afetado apontado. Você quer continuar sabendo por último?",
-    "O que essa notícia muda pra quem investe? A resposta fica no VIP — aqui é o dado, lá é a decisão.",
-]
 
 
 def traduzir(texto, idioma_origem):
@@ -41,6 +37,28 @@ def traduzir(texto, idioma_origem):
         return texto
 
 
+def limpar_html(texto):
+    texto = re.sub(r"<[^>]+>", " ", texto or "")
+    texto = html.unescape(texto)
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def extrair_imagem(item):
+    enc = item.find("enclosure")
+    if enc is not None:
+        url = enc.attrib.get("url", "")
+        tipo = enc.attrib.get("type", "")
+        if url and (tipo.startswith("image") or url.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))):
+            return url
+    for el in item.iter():
+        tag = el.tag.split("}")[-1]
+        if tag in ("content", "thumbnail") and el.attrib.get("url"):
+            return el.attrib["url"]
+    desc = item.findtext("description", default="") or ""
+    m = re.search(r'<img[^>]+src=["\']([^"\']+)', desc)
+    return m.group(1) if m else None
+
+
 def buscar_manchete(url, idioma):
     resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
     resp.raise_for_status()
@@ -48,8 +66,16 @@ def buscar_manchete(url, idioma):
     item = root.find(".//item")
     if item is None:
         return None
+
     titulo = (item.findtext("title", default="") or "").strip()
-    return traduzir(titulo, idioma)
+    descricao = limpar_html(item.findtext("description", default=""))[:400]
+    imagem = extrair_imagem(item)
+
+    return {
+        "titulo": traduzir(titulo, idioma),
+        "descricao": traduzir(descricao, idioma)[:300] if descricao else "",
+        "imagem": imagem,
+    }
 
 
 def buscar_clima():
@@ -79,26 +105,40 @@ def buscar_clima():
 def montar_mensagem(indice_pilar):
     pilar = PILARES[indice_pilar]
     agora = datetime.now(timezone.utc).strftime("%d/%m %H:%M UTC")
+    imagem = None
 
     try:
         if pilar["tipo"] == "rss":
-            conteudo = buscar_manchete(pilar["rss"], pilar["idioma"]) or "sem novidades no momento"
+            info = buscar_manchete(pilar["rss"], pilar["idioma"])
+            if info:
+                corpo = f"*{info['titulo']}*"
+                if info["descricao"]:
+                    corpo += f"\n\n{info['descricao']}"
+                imagem = info["imagem"]
+            else:
+                corpo = "sem novidades no momento"
         elif pilar["tipo"] == "clima":
-            conteudo = buscar_clima()
+            corpo = buscar_clima()
         else:
-            conteudo = "conteúdo indisponível"
+            corpo = "conteúdo indisponível"
     except Exception as e:
-        conteudo = f"fonte indisponível ({type(e).__name__})"
+        corpo = f"fonte indisponível ({type(e).__name__})"
 
-    campanha = CAMPANHAS_VIP[indice_pilar % len(CAMPANHAS_VIP)]
+    texto = f"*{pilar['nome']}* — {agora}\n\n{corpo}"
+    return texto, imagem
 
-    return f"*{pilar['nome']}* — {agora}\n\n{conteudo}\n\n🔓 _{campanha}_"
 
-
-def enviar_telegram(texto):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+def enviar_texto(texto):
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "Markdown"}
-    resp = requests.post(url, data=payload, timeout=15)
+    resp = requests.post(f"{BASE_URL}/sendMessage", data=payload, timeout=15)
+    resp.raise_for_status()
+
+
+def enviar_foto(imagem_url, legenda):
+    if len(legenda) > 1024:
+        legenda = legenda[:1000] + "…"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "photo": imagem_url, "caption": legenda, "parse_mode": "Markdown"}
+    resp = requests.post(f"{BASE_URL}/sendPhoto", data=payload, timeout=20)
     resp.raise_for_status()
 
 
@@ -113,10 +153,19 @@ def main():
         print("Hora atual fora do roteiro — nada a enviar.")
         return
 
-    mensagem = montar_mensagem(indice)
-    enviar_telegram(mensagem)
+    texto, imagem = montar_mensagem(indice)
+
+    try:
+        if imagem:
+            enviar_foto(imagem, texto)
+        else:
+            enviar_texto(texto)
+    except Exception as e:
+        print("Falha ao enviar com imagem, tentando só texto:", e)
+        enviar_texto(texto)
+
     print("Mensagem enviada com sucesso:")
-    print(mensagem)
+    print(texto)
 
 
 if __name__ == "__main__":
