@@ -1,1 +1,27 @@
-{"name":"Atualizacao de criptomoedas no Telegram","on":{"schedule":[{"cron":"0 0,9,18 * * *"}],"workflow_dispatch":{}},"jobs":{"enviar-precos":{"runs-on":"ubuntu-latest","steps":[{"name":"Checkout do repositorio","uses":"actions/checkout@v4"},{"name":"Configurar Python","uses":"actions/setup-python@v5","with":{"python-version":"3.11"}},{"name":"Instalar dependencias","run":"pip install -r requirements.txt"},{"name":"Rodar script","env":{"TELEGRAM_BOT_TOKEN":"${{ secrets.TELEGRAM_BOT_TOKEN }}","TELEGRAM_CHAT_ID":"${{ secrets.TELEGRAM_CHAT_ID }}"},"run":"python crypto_update.py"}]}}}
+name: Cotacoes cripto
+
+# Sem "schedule": quem dispara é o cron-job.org (05:00 e 21:00, fuso America/Sao_Paulo).
+on:
+  workflow_dispatch:
+
+jobs:
+  cotacoes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fonte para a imagem
+        run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
+
+      - name: Dependencias
+        run: pip install requests pillow
+
+      - name: Publicar cotacoes
+        run: python crypto_update.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
