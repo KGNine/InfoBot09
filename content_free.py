@@ -46,10 +46,10 @@ PILARES = [
      "fonte": "TechCrunch", "cor": (0, 220, 255), "motivo": "rede"},
     {"nome": "🌦️ Clima & Mercado", "arte": "CLIMA & MERCADO", "tipo": "clima", "idioma": "pt",
      "fonte": "Open-Meteo", "cor": (255, 176, 46), "motivo": "sol"},
-]
+]# hora UTC -> índice do pilar (Brasília = UTC-3)
+# 05h Clima, 08h Sala de Trade, 10h Radar IA, 14h Termômetro BR, 16h Giro Global, 21h Cripto Pulse
+HORARIOS_UTC = {8: 5, 11: 3, 13: 4, 17: 1, 19: 2, 0: 0}
 
-# hora UTC -> índice do pilar (07h, 09h, 11h, 13h, 15h e 17h em Brasília)
-HORARIOS_UTC = {10: 0, 12: 1, 14: 2, 16: 3, 18: 4, 20: 5}
 
 W, H = 1080, 1350
 MARGEM = 80
