@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-L.I.C.A. | Conteúdo gratuito (6 pilares, 1 por horário)
+L.I.C.A. | Conteúdo gratuito (6 pilares, 1 por horário) + texto completo para o VIP
 Mudanças desta versão:
-- Arte própria gerada no código (sem logo de emissora ou marca de ninguém)
-- Resumo que nunca corta no meio da frase (cabe na imagem e na legenda)
-- Mais conteúdo por post: manchete + resumo + "Também em pauta" (outras manchetes)
-- Horário em Brasília e janela de tolerância (se o disparo atrasar, ainda publica)
-- Envio em HTML (acentos e símbolos não quebram a mensagem)
+- "Também em pauta" removido de todos os pilares
+- Cripto Pulse: sem fonte; frase do Nine0 abaixo de "conteúdo informativo" (55% de opacidade)
+- A cada post, o Nine0 reescreve a notícia (padrão L.I.C.A.) e envia texto completo ao grupo VIP
+- Hora + (postado) no final de cada texto
 
 Variáveis de ambiente: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+Para o Nine0 e o VIP: ANTHROPIC_API_KEY, TELEGRAM_VIP_CHAT_ID
 Opcional: FORCAR_PILAR=0..5 (força um pilar fora do horário)
 Teste da arte sem enviar nada: python conteudo_gratuito.py --preview
 """
@@ -23,15 +23,32 @@ from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
+try:
+    from nine0_cripto import frase_nine0, _nine0, enviar_vip
+except Exception as _e:  # sem o Nine0 o conteúdo gratuito continua saindo
+    print("Nine0 indisponível (nine0_cripto.py não encontrado):", _e)
+
+    def frase_nine0(titulo, resumo):
+        return "Paciência é a forma mais elegante de estar certo no tempo certo."
+
+    def _nine0(prompt, max_tokens=900):
+        return ""
+
+    def enviar_vip(texto):
+        print("VIP indisponível")
+
 FUSO = ZoneInfo("America/Sao_Paulo")
 LAT, LON = -31.77, -52.34  # Pelotas/RS
 LIMITE_LEGENDA = 1000  # Telegram aceita 1024; fica uma folga
+LIMITE_VIP = 4000      # Telegram aceita 4096
+ALFA_FRASE = int(255 * 0.55)  # frase do Nine0 com 55% de opacidade
+VIP_PILARES = {0, 1, 2, 3, 4, 5}  # pilares que também geram texto para o VIP
 AVISO = "⚠️ Conteúdo informativo, não é recomendação de investimento."
 
 PILARES = [
     {"nome": "🪙 Cripto Pulse", "arte": "CRIPTO PULSE", "tipo": "rss",
      "rss": "https://www.coindesk.com/arc/outboundfeeds/rss/", "idioma": "en",
-     "fonte": "CoinDesk", "cor": (247, 160, 40), "motivo": "moeda"},
+     "fonte": "CoinDesk", "cor": (247, 160, 40), "motivo": "moeda", "sem_fonte": True},
     {"nome": "🇧🇷 Termômetro BR", "arte": "TERMÔMETRO BR", "tipo": "rss",
      "rss": "https://g1.globo.com/rss/g1/economia/", "idioma": "pt",
      "fonte": "g1 Economia", "cor": (46, 204, 113), "motivo": "medidor"},
@@ -62,6 +79,8 @@ FONTES_BOLD = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
                "C:/Windows/Fonts/arialbd.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"]
 FONTES_REG = ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
               "C:/Windows/Fonts/arial.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf"]
+FONTES_OBL = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+              "C:/Windows/Fonts/ariali.ttf", "/System/Library/Fonts/Supplemental/Arial Italic.ttf"]
 
 
 def fonte(caminhos, tam):
@@ -112,7 +131,7 @@ def traduzir(texto, idioma_origem):
 
 
 # ------------------------------------------------------------------ fontes de conteúdo
-def buscar_noticias(url, idioma, extras=2):
+def buscar_noticias(url, idioma):
     resp = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
     resp.raise_for_status()
     itens = ET.fromstring(resp.content).findall(".//item")
@@ -123,14 +142,9 @@ def buscar_noticias(url, idioma, extras=2):
     descricao = limpar_html(p.findtext("description", default=""))
     if descricao.lower().startswith(titulo.lower()[:40]):
         descricao = ""  # descrição que só repete o título não ajuda
-    outros = []
-    for it in itens[1:1 + extras]:
-        t = limpar_html(it.findtext("title", default=""))
-        if t:
-            outros.append(traduzir(t, idioma))
     return {"titulo": traduzir(titulo, idioma),
             "resumo": traduzir(descricao, idioma) if descricao else "",
-            "extras": outros}
+            "extras": []}
 
 
 ROTULOS_CLIMA = {"sol": "Céu limpo", "parcial": "Parcialmente nublado", "nublado": "Nublado",
@@ -323,7 +337,24 @@ def ajustar(d, texto, tamanhos, bold, largura, max_linhas):
         limite = int(limite * 0.85)
 
 
-def gerar_arte(pilar, titulo, resumo, agora, clima=None):
+def desenhar_frase(d, frase, x, y):
+    """Frase do Nine0: itálico, filete dourado à esquerda, 55% de opacidade, até 2 linhas."""
+    frase = so_caracteres_da_fonte(frase)
+    larg = W - 2 * MARGEM - 170  # deixa espaço para o L.I.C.A. à direita
+    tam, f, linhas = 26, None, []
+    for tam in (26, 24, 22, 20):
+        f = fonte(FONTES_OBL, tam)
+        linhas = quebrar(d, frase, f, larg)
+        if len(linhas) <= 2:
+            break
+    linhas = linhas[:2]
+    passo = int(tam * 1.3)
+    d.rectangle([x, y + 3, x + 4, y + len(linhas) * passo - 3], fill=DOURADO + (ALFA_FRASE,))
+    for i, ln in enumerate(linhas):
+        d.text((x + 20, y + i * passo), ln, font=f, fill=(255, 255, 255, ALFA_FRASE))
+
+
+def gerar_arte(pilar, titulo, resumo, agora, clima=None, frase=None):
     if clima:
         return gerar_arte_clima(pilar, clima, agora)
     cor = pilar["cor"]
@@ -353,9 +384,16 @@ def gerar_arte(pilar, titulo, resumo, agora, clima=None):
             y += int(f_res.size * 1.42)
 
     d.line([(MARGEM, H - 150), (W - MARGEM, H - 150)], fill=(255, 255, 255, 40), width=1)
-    d.text((MARGEM, H - 112), "Conteúdo informativo, não é recomendação de investimento.",
-           font=fonte(FONTES_REG, 22), fill=CINZA)
-    d.text((MARGEM, H - 72), f"Fonte: {pilar['fonte']}", font=fonte(FONTES_REG, 24), fill=CINZA)
+    if pilar.get("sem_fonte") and frase:
+        # Cripto Pulse: sem fonte; frase do Nine0 logo abaixo de "conteúdo informativo"
+        d.text((MARGEM, H - 132), "Conteúdo informativo, não é recomendação de investimento.",
+               font=fonte(FONTES_REG, 22), fill=CINZA)
+        desenhar_frase(d, frase, MARGEM, H - 92)
+    else:
+        d.text((MARGEM, H - 112), "Conteúdo informativo, não é recomendação de investimento.",
+               font=fonte(FONTES_REG, 22), fill=CINZA)
+        if not pilar.get("sem_fonte"):
+            d.text((MARGEM, H - 72), f"Fonte: {pilar['fonte']}", font=fonte(FONTES_REG, 24), fill=CINZA)
     d.text((W - MARGEM, H - 76), "L.I.C.A.", font=fonte(FONTES_BOLD, 30), fill=DOURADO, anchor="ra")
     return img
 
@@ -475,211 +513,4 @@ def gerar_arte_clima(pilar, c, agora):
 
     # cabeçalho no padrão L.I.C.A.
     d.rectangle([MARGEM, 90, MARGEM + 110, 96], fill=DOURADO)
-    d.text((MARGEM, 120), pilar["arte"], font=fonte(FONTES_BOLD, 46), fill=cor)
-    d.text((MARGEM, 186), agora.strftime("%d/%m/%Y  •  %H:%M (Brasília)"), font=fonte(FONTES_REG, 28), fill=CINZA)
-    d.text((W - MARGEM, 128), "PELOTAS / RS", font=fonte(FONTES_BOLD, 30), fill=DOURADO, anchor="ra")
-
-    # cena principal (muda conforme o tempo agora)
-    caixa = (MARGEM, 250, W - MARGEM, 770)
-    cartao_degrade(img, caixa, topo, base)
-    d = ImageDraw.Draw(img, "RGBA")
-    if ceu_noturno:
-        for (x, y) in ESTRELAS:
-            d.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(255, 255, 255, 190))
-    tam_icone, cy_icone = {"sol": (300, 490), "parcial": (300, 490), "nublado": (300, 490),
-                           "chuva": (260, 490), "neblina": (260, 490), "tempestade": (210, 472)}[tipo]
-    icone(img, tipo, noite, 320, cy_icone, tam_icone)
-    d = ImageDraw.Draw(img, "RGBA")
-    d.text((MARGEM + 44, 286), "AGORA EM PELOTAS", font=fonte(FONTES_BOLD, 26), fill=(255, 255, 255, 200))
-    d.text((765, 330), f"{c['agora']:.0f}°", font=fonte(FONTES_BOLD, 210), fill=BRANCO, anchor="ma")
-    d.text((765, 575), f"Máx {c['tmax']:.0f}°  •  Mín {c['tmin']:.0f}°", font=fonte(FONTES_BOLD, 34), fill=BRANCO, anchor="ma")
-    d.text((MARGEM + 44, 700), c["rotulo"], font=fonte(FONTES_BOLD, 46), fill=BRANCO)
-
-    # faixa de alerta / nota (até 2 linhas, sem cortar)
-    if c["alerta"]:
-        cor_f = (255, 82, 108)
-    elif c["faixa"].startswith("Sem alertas"):
-        cor_f = (46, 224, 140)
-    else:
-        cor_f = (255, 176, 46)
-    d.rounded_rectangle([MARGEM, 792, W - MARGEM, 892], radius=28, fill=cor_f + (46,), outline=cor_f + (200,), width=3)
-    f_f = fonte(FONTES_BOLD, 30)
-    linhas = quebrar(d, so_caracteres_da_fonte(c["faixa"]), f_f, W - 2 * MARGEM - 60)[:2]
-    y = 842 - (len(linhas) * 40) // 2
-    for ln in linhas:
-        d.text((W / 2, y), ln, font=f_f, fill=cor_f, anchor="ma")
-        y += 40
-
-    # indicadores
-    larg = (W - 2 * MARGEM - 40) // 3
-    ind = [("CHUVA HOJE", f"{c['chuva']:.0f} mm", f"probabilidade {c['prob']:.0f}%"),
-           ("VENTO", f"{c['vento']:.0f} km/h", f"rajadas até {c['rajada']:.0f} km/h"),
-           ("PRÓXIMOS 3 DIAS", f"{c['total3']:.0f} mm", "chuva acumulada")]
-    for i, (rot, val, sub) in enumerate(ind):
-        x0 = MARGEM + i * (larg + 20)
-        cartao(d, x0, 912, x0 + larg, 1044)
-        d.text((x0 + 22, 930), rot, font=fonte(FONTES_REG, 23), fill=CINZA)
-        d.text((x0 + 22, 964), val, font=fonte(FONTES_BOLD, 42), fill=BRANCO)
-        d.text((x0 + 22, 1012), sub, font=fonte(FONTES_REG, 22), fill=CINZA)
-
-    # próximos 3 dias
-    for i, dia in enumerate(c["dias"][:3]):
-        x0 = MARGEM + i * (larg + 20)
-        cartao(d, x0, 1062, x0 + larg, 1184)
-        icone(img, dia["tipo"], False, x0 + 62, 1120, 70)
-        d = ImageDraw.Draw(img, "RGBA")
-        d.text((x0 + 128, 1078), dia["dia"].upper(), font=fonte(FONTES_BOLD, 28), fill=cor)
-        d.text((x0 + 128, 1116), f"{dia['tmax']:.0f}° / {dia['tmin']:.0f}°", font=fonte(FONTES_BOLD, 30), fill=BRANCO)
-        d.text((x0 + 128, 1156), f"chuva {dia['chuva']:.0f} mm", font=fonte(FONTES_REG, 21), fill=CINZA)
-
-    # rodapé padrão
-    d.line([(MARGEM, H - 150), (W - MARGEM, H - 150)], fill=(255, 255, 255, 40), width=1)
-    d.text((MARGEM, H - 118), "Previsão de modelo; não substitui avisos oficiais. Conteúdo informativo.",
-           font=fonte(FONTES_REG, 21), fill=CINZA)
-    d.text((MARGEM, H - 76), f"Fonte: {pilar['fonte']}", font=fonte(FONTES_REG, 24), fill=CINZA)
-    d.text((W - MARGEM, H - 80), "L.I.C.A.", font=fonte(FONTES_BOLD, 30), fill=DOURADO, anchor="ra")
-    return img
-
-
-def cartao(d, x0, y0, x1, y1, raio=24):
-    d.rounded_rectangle([x0, y0, x1, y1], radius=raio, fill=(255, 255, 255, 20),
-                        outline=(255, 255, 255, 55), width=2)
-
-
-# ------------------------------------------------------------------ legenda e envio
-def montar_legenda(pilar, titulo, resumo, extras, agora):
-    cab = f"<b>{html.escape(pilar['nome'])}</b> — {agora.strftime('%d/%m %H:%M')} (Brasília)"
-    base = [cab, "", f"<b>{html.escape(titulo)}</b>"]
-    rodape = ["", f"Fonte: {html.escape(pilar['fonte'])}", AVISO]
-
-    def tam(linhas):
-        return len("\n".join(linhas))
-
-    partes = list(base)
-    sobra = LIMITE_LEGENDA - tam(base + rodape) - 6
-    if resumo and sobra > 80:
-        partes += ["", html.escape(resumir(resumo, int(sobra * 0.88)))]
-    if extras:
-        bloco = ["", f"<b>{pilar.get('rotulo_extras', 'Também em pauta')}:</b>"]
-        for e in extras:
-            linha = "▫️ " + html.escape(resumir(e, 140))
-            if tam(partes + bloco + [linha] + rodape) <= LIMITE_LEGENDA:
-                bloco.append(linha)
-        if len(bloco) > 2:
-            partes += bloco
-    return "\n".join(partes + rodape)
-
-
-def api(metodo):
-    return f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/{metodo}"
-
-
-def enviar_texto(legenda):
-    r = requests.post(api("sendMessage"), data={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": legenda,
-                                                "parse_mode": "HTML", "disable_web_page_preview": "true"}, timeout=30)
-    if r.status_code != 200:
-        raise RuntimeError(f"Telegram {r.status_code}: {r.text[:300]}")
-
-
-def enviar_foto(img, legenda):
-    import io
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
-    buf.seek(0)
-    r = requests.post(api("sendPhoto"),
-                      data={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "caption": legenda, "parse_mode": "HTML"},
-                      files={"photo": ("arte.png", buf, "image/png")}, timeout=60)
-    if r.status_code != 200:
-        raise RuntimeError(f"Telegram {r.status_code}: {r.text[:300]}")
-
-
-# ------------------------------------------------------------------ fluxo principal
-def escolher_indice(agora_utc):
-    h = agora_utc.hour
-    if h in HORARIOS_UTC:
-        return HORARIOS_UTC[h]
-    if (h - 1) in HORARIOS_UTC:  # disparo atrasou: ainda vale o horário anterior
-        return HORARIOS_UTC[h - 1]
-    return None
-
-
-def montar_conteudo(pilar):
-    if pilar["tipo"] == "clima":
-        return buscar_clima()
-    return buscar_noticias(pilar["rss"], pilar["idioma"])
-
-
-def main():
-    if "--preview" in sys.argv:
-        return preview()
-
-    forcar = os.environ.get("FORCAR_PILAR", "").strip()
-    agora_utc = datetime.now(timezone.utc)
-    if forcar.isdigit() and int(forcar) < len(PILARES):
-        indice = int(forcar)
-    else:
-        indice = escolher_indice(agora_utc)
-    if indice is None:
-        print("Hora atual fora do roteiro: nada a enviar.")
-        return
-
-    pilar = PILARES[indice]
-    agora = agora_utc.astimezone(FUSO)
-    try:
-        c = montar_conteudo(pilar)
-    except Exception as e:
-        print("Fonte indisponível:", type(e).__name__, e)
-        c = None
-    if not c or not c["titulo"]:
-        print("Sem conteúdo para este horário; nada enviado (evita post vazio).")
-        return
-
-    legenda = montar_legenda(pilar, c["titulo"], c["resumo"], c["extras"], agora)
-    try:
-        enviar_foto(gerar_arte(pilar, c["titulo"], c["resumo"], agora, c.get("clima")), legenda)
-    except Exception as e:
-        print("Falha com imagem, enviando só texto:", e)
-        enviar_texto(legenda)
-    print("Enviado:", pilar["nome"])
-    print(legenda)
-
-
-def preview():
-    """Gera uma arte de teste de cada pilar, com textos de exemplo (não envia nada)."""
-    agora = datetime.now(FUSO)
-    ex = {
-        "titulo": "Dólar fecha em queda e Ibovespa sobe com expectativa sobre os próximos passos dos juros nos EUA e no Brasil",
-        "resumo": ("O mercado reagiu ao cenário externo e a moeda americana recuou frente ao real. "
-                   "Investidores acompanham a ata do Fed e dados de inflação para calibrar as apostas sobre juros. "
-                   "Nos próximos dias, a agenda de indicadores deve concentrar a atenção do mercado."),
-        "extras": ["Petróleo recua com sinais de demanda mais fraca", "Bolsas da Europa fecham sem direção única"],
-    }
-    for i, p in enumerate(PILARES):
-        if p["tipo"] != "clima":
-            gerar_arte(p, ex["titulo"], ex["resumo"], agora).save(f"preview_{i}.png")
-    # artes do clima de teste: cada condição do tempo (dados fictícios)
-    base = {"agora": 21.0, "vento": 14, "tmax": 27, "tmin": 14, "chuva": 0, "prob": 10, "rajada": 32,
-            "total3": 1, "alerta": None, "faixa": "Pouquíssima chuva nos próximos dias: atenção às lavouras da região.",
-            "dias": [{"dia": "Sáb", "tipo": "sol", "tmax": 26, "tmin": 13, "chuva": 0},
-                     {"dia": "Dom", "tipo": "chuva", "tmax": 22, "tmin": 15, "chuva": 18},
-                     {"dia": "Seg", "tipo": "tempestade", "tmax": 21, "tmin": 14, "chuva": 40}]}
-    casos = {
-        "sol": dict(base, tipo="sol", noite=False, rotulo="Céu limpo"),
-        "noite": dict(base, tipo="sol", noite=True, rotulo="Céu limpo", agora=11.0, tmax=24, tmin=10),
-        "parcial": dict(base, tipo="parcial", noite=False, rotulo="Parcialmente nublado"),
-        "nublado": dict(base, tipo="nublado", noite=False, rotulo="Nublado", faixa="Sem alertas relevantes na previsão dos próximos dias."),
-        "chuva": dict(base, tipo="chuva", noite=False, rotulo="Chuva", chuva=22, prob=90, total3=80,
-                      faixa="Volume alto de chuva previsto: risco de excesso hídrico no campo."),
-        "tempestade": dict(base, tipo="tempestade", noite=False, rotulo="Tempestade", chuva=35, prob=95, rajada=72, total3=95,
-                           alerta="ATENÇÃO: possibilidade de tempestade hoje",
-                           faixa="ATENÇÃO: possibilidade de tempestade hoje"),
-    }
-    pc = PILARES[5]
-    for nome, dados in casos.items():
-        gerar_arte(pc, "x", "x", agora, dados).save(f"preview_clima_{nome}.png")
-    print(montar_legenda(PILARES[1], ex["titulo"], ex["resumo"], ex["extras"], agora))
-    print("\nArtes de teste salvas: preview_*.png e preview_clima_*.png (dados fictícios).")
-
-
-if __name__ == "__main__":
-    main()
+    d.text((MARGEM, 120), pilar["arte"], fon
