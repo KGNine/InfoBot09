@@ -75,6 +75,7 @@ def estrelas(impacto, titulo):
 
 def carregar_globais(hoje, janela_dias=7, log=print):
     fim = hoje + timedelta(days=janela_dias)
+        agora = datetime.now(FUSO)
     vistos, saida = set(), []
     for url in FEEDS_GLOBAIS:
         try:
@@ -97,6 +98,8 @@ def carregar_globais(hoje, janela_dias=7, log=print):
                 loc = dt.astimezone(FUSO)
                 if not (hoje <= loc.date() < fim):
                     continue
+                                    if not sem_hora and loc < agora:
+                    continue  # evento que já aconteceu hoje não entra
                 chave = (loc.isoformat(), e.get("country"), e.get("title"))
                 if chave in vistos:
                     continue
