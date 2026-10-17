@@ -2,6 +2,10 @@
 """
 L.I.C.A. | Conteúdo gratuito (6 pilares, 1 por horário) + texto completo para o VIP
 Mudanças desta versão:
+- Nine3 (jornalista econômico, nine3_noticias.py) escolhe a notícia de MAIOR IMPACTO de cada pilar
+  entre várias fontes; se ele falhar, o pilar usa a fonte padrão de antes
+- "Fonte:" mostra de onde o Nine3 tirou a notícia
+- Texto do VIP parte dos parágrafos da própria notícia e termina com uma pergunta para o grupo
 - "Também em pauta" removido de todos os pilares
 - Cripto Pulse: sem fonte; frase do Nine0 abaixo de "conteúdo informativo" (55% de opacidade)
 - A cada post, o Nine0 reescreve a notícia (padrão L.I.C.A.) e envia texto completo ao grupo VIP
@@ -23,6 +27,12 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+try:
+    import nine3_noticias as nine3
+except Exception as _e:  # sem o Nine3 cada pilar usa a fonte padrão
+    print("Nine3 indisponível (nine3_noticias.py não encontrado):", _e)
+    nine3 = None
 
 try:
     from nine0_cripto import frase_nine0, _nine0, enviar_vip
@@ -622,8 +632,9 @@ def texto_vip(pilar, titulo, resumo, extras, frase, agora):
          "sentido original, no ambiente L.I.C.A.: vocabulário mais inteligente, tom "
          "profissional e claro, sem exageros e sem recomendação de compra ou venda. "
          "Use SOMENTE os fatos fornecidos: não invente dados, nomes ou números, e mantenha "
-         "todos os números exatos. Escreva de 2 a 4 parágrafos curtos, de acordo com a "
-         "quantidade de informação disponível. Responda neste formato exato, texto puro, "
+         "todos os números exatos. Escreva de 3 a 5 parágrafos curtos, explicando o fato, "
+         "por que importa para o mercado e o que observar a seguir; encerre com UMA pergunta "
+         "para o grupo responder. Responda neste formato exato, texto puro, "
          "sem markdown:\nTITULO: <título reescrito>\nCORPO: <texto>\n\n"
          f"Pilar: {pilar['arte']}\nTítulo: {titulo}\nInformação: {fatos}")
     saida = _nine0(p, 1300)
@@ -679,6 +690,14 @@ def escolher_indice(agora_utc):
 def montar_conteudo(pilar):
     if pilar["tipo"] == "clima":
         return buscar_clima()
+    if nine3:
+        try:
+            c = nine3.melhor_para(pilar, traduzir)
+            if c:
+                return c
+            print("Nine3 sem notícia forte; usando a fonte padrão do pilar.")
+        except Exception as e:
+            print("Nine3 falhou, usando a fonte padrão:", e)
     return buscar_noticias(pilar["rss"], pilar["idioma"])
 
 
@@ -707,6 +726,9 @@ def main():
         print("Sem conteúdo para este horário; nada enviado (evita post vazio).")
         return
 
+    if c.get("fonte"):
+        pilar = dict(pilar, fonte=c["fonte"])  # "Fonte:" mostra de onde o Nine3 tirou a notícia
+
     # frase filosófica: só no Cripto Pulse, criada pelo Nine0
     frase = None
     if pilar.get("sem_fonte"):
@@ -727,7 +749,8 @@ def main():
     # texto completo para o grupo VIP, no mesmo disparo (só quando o grupo VIP estiver configurado)
     if indice in VIP_PILARES and os.environ.get("TELEGRAM_VIP_CHAT_ID"):
         try:
-            enviar_vip(texto_vip(pilar, c["titulo"], c["resumo"], c["extras"], frase, agora))
+            base = nine3.corpo_da_noticia(c.get("link")) if nine3 else ""
+            enviar_vip(texto_vip(pilar, c["titulo"], base or c["resumo"], c["extras"], frase, agora))
         except Exception as e:
             print("Falha ao enviar ao VIP:", e)
 
