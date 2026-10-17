@@ -178,6 +178,90 @@ def pedido_vip(r):
     )
 
 
+# ======== v2: fontes por pilar do conteudo_gratuito.py + texto completo para o VIP ========
+UA = {"User-Agent": "Mozilla/5.0 (L.I.C.A. Nine3)"}
+
+PESOS.update({k: 5 for k in ["interest rate", "rate cut", "rate hike", "inflation", "tariff", "tariffs",
+                             "recession", "fomc", "gdp", "sanctions", "war", "default"]})
+PESOS.update({k: 3 for k in ["oil", "dollar", "stocks", "nasdaq", "record", "jobs", "unemployment", "bank",
+                             "gold", "gpt", "chip", "chips", "regulation", "funding", "acquisition"]})
+PESOS.update({k: 1 for k in ["surge", "plunge", "rally", "selloff", "earnings", "profit"]})
+LIXO.extend(["horoscope", "lottery", "giveaway", "sponsored", "coupon", "black friday"])
+
+# 1o feed de cada pilar = o que voce ja usava; os outros dao mais opcoes de noticia forte.
+# (nome mostrado em "Fonte:", url, idioma). Feed fora do ar e ignorado.
+PILAR_FEEDS = {
+    "cripto pulse": [
+        ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/", "en"),
+        ("Cointelegraph", "https://cointelegraph.com/rss", "en"),
+        ("Cointelegraph Brasil", "https://br.cointelegraph.com/rss", "pt"),
+    ],
+    "termometro br": [
+        ("g1 Economia", "https://g1.globo.com/rss/g1/economia/", "pt"),
+        ("InfoMoney", "https://www.infomoney.com.br/feed/", "pt"),
+        ("Agência Brasil", "https://agenciabrasil.ebc.com.br/rss/economia/feed.xml", "pt"),
+    ],
+    "giro global": [
+        ("BBC News", "http://feeds.bbci.co.uk/news/business/rss.xml", "en"),
+        ("CNBC", "https://www.cnbc.com/id/20910258/device/rss/rss.html", "en"),
+    ],
+    "sala de trade": [
+        ("Investing.com", "https://www.investing.com/rss/news.rss", "en"),
+        ("Money Times", "https://www.moneytimes.com.br/feed/", "pt"),
+    ],
+    "radar ia": [
+        ("TechCrunch", "https://techcrunch.com/category/artificial-intelligence/feed/", "en"),
+        ("The Verge", "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml", "en"),
+    ],
+}
+
+
+def melhor_para(pilar, traduzir_fn=None, horas=12, minimo=6, log=print):
+    """Escolhe a noticia de maior impacto para o pilar do conteudo_gratuito.py.
+    Devolve {"titulo","resumo","extras","link","fonte"} ja traduzido, ou None (cai no feed padrao)."""
+    feeds = PILAR_FEEDS.get(norm(pilar.get("arte", "")))
+    if not feeds:
+        return None
+    itens = []
+    for nome, url, idioma in feeds:
+        try:
+            r = requests.get(url, timeout=15, headers=UA)
+            r.raise_for_status()
+            lote = parse_feed(r.content, nome)
+            for i in lote:
+                i["idioma"] = idioma
+            log(f"[Nine3] {nome}: {len(lote)} noticias")
+            itens += lote
+        except Exception as e:
+            log(f"[Nine3] {nome}: falhou ({e})")
+    ranking = pontuar(itens, horas)
+    if not ranking or ranking[0]["score"] < minimo:
+        log("[Nine3] nenhuma noticia acima da nota minima")
+        return None
+    b = ranking[0]
+    log(f"[Nine3] escolhida (nota {b['score']}): {b['titulo']} | fontes: {', '.join(b['fontes'])}")
+    tr = traduzir_fn or (lambda t, i: t)
+    resumo = b["resumo"]
+    if resumo.lower().startswith(b["titulo"].lower()[:40]):
+        resumo = ""  # descricao que so repete o titulo nao ajuda
+    return {"titulo": tr(b["titulo"], b["idioma"]), "resumo": tr(resumo, b["idioma"]) if resumo else "",
+            "extras": [], "link": b["link"], "fonte": b["fonte"]}
+
+
+def corpo_da_noticia(link, limite=3500):
+    """Base de fatos para o texto completo do VIP: paragrafos da propria pagina da noticia.
+    O texto final e reescrito pelo Nine0 com palavras proprias. Pagina paga/bloqueada devolve ''."""
+    if not link:
+        return ""
+    try:
+        r = requests.get(link, timeout=20, headers=UA)
+        r.raise_for_status()
+        paras = [limpa(p, 2000) for p in re.findall(r"<p[^>]*>(.*?)</p>", r.text, re.S | re.I)]
+        return limpa(" ".join(p for p in paras if len(p) > 60), limite)
+    except Exception:
+        return ""
+
+
 if __name__ == "__main__":
     for p in [None, "Termometro BR", "Giro Global", "Cripto Pulse", "Radar IA"]:
         top = escolher(p, n=2)
