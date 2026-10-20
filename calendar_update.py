@@ -97,37 +97,3 @@ def carregar_globais(hoje, janela_dias=7, log=print):
             r.raise_for_status()
             dados = r.json()
             log(f"[Calendario] {nome}: {len(dados)} eventos")
-        except Exception as e:
-            log(f"[Calendario] feed falhou ({nome}): {e}")
-            continue
-        for e in dados:
-            try:
-                n = estrelas(e.get("impact"), e.get("title", ""))
-                if n < 3:
-                    continue
-                dt = datetime.fromisoformat(e["date"])
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=NY)
-                sem_hora = (dt.hour, dt.minute) == (0, 0)
-                loc = dt.astimezone(FUSO)
-                if not (hoje <= loc.date() < fim):
-                    continue
-                if not sem_hora and loc < agora:
-                    continue  # evento que ja aconteceu hoje nao entra
-                chave = (loc.isoformat(), e.get("country"), e.get("title"))
-                if chave in vistos:
-                    continue
-                vistos.add(chave)
-                saida.append(dict(
-                    dia=loc.date(),
-                    hora="" if sem_hora else loc.strftime("%H:%M"),
-                    estrelas=n,
-                    pais=e.get("country", "ALL"),
-                    titulo=traduzir_titulo(e.get("title", "")),
-                ))
-            except Exception as ex:
-                log(f"[Calendario] evento ignorado: {ex}")
-    return saida
-
-
-# ---------------- EVENTOS BR (e plano B global) ----------------
