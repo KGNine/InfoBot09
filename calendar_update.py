@@ -75,7 +75,7 @@ def estrelas(impacto, titulo):
 
 def carregar_globais(hoje, janela_dias=7, log=print):
     fim = hoje + timedelta(days=janela_dias)
-        agora = datetime.now(FUSO)
+    agora = datetime.now(FUSO)
     vistos, saida = set(), []
     for url in FEEDS_GLOBAIS:
         try:
@@ -98,7 +98,7 @@ def carregar_globais(hoje, janela_dias=7, log=print):
                 loc = dt.astimezone(FUSO)
                 if not (hoje <= loc.date() < fim):
                     continue
-                                    if not sem_hora and loc < agora:
+                if not sem_hora and loc < agora:
                     continue  # evento que já aconteceu hoje não entra
                 chave = (loc.isoformat(), e.get("country"), e.get("title"))
                 if chave in vistos:
@@ -144,99 +144,4 @@ def eventos_locais(hoje, janela_dias=7, so_brasil=True):
 
     def add(d, n, pais, titulo):
         if hoje <= d < limite:
-            ev.append({"dia": d, "hora": "", "estrelas": n, "pais": pais, "titulo": titulo})
-
-    for pais, nome, datas in BANCOS_CENTRAIS:
-        if so_brasil and pais != "BRL":
-            continue
-        for d in datas:
-            add(d, 5, pais, nome)
-            if pais == "BRL":
-                add(d + timedelta(days=6), 3, pais, "Ata do Copom (data estimada, confirme no BC)")
-    add(proximo_dia_aproximado(hoje, 10), 4, "BRL", "IPCA (inflação) — data estimada, confirme no IBGE")
-    if not so_brasil:
-        add(proximo_dia_aproximado(hoje, 13), 4, "USD", "CPI dos EUA (inflação) — data estimada, confirme no BLS")
-        p = primeira_sexta(hoje.year, hoje.month)
-        if p < hoje:
-            p = primeira_sexta(hoje.year + (hoje.month == 12), 1 if hoje.month == 12 else hoje.month + 1)
-        add(p, 4, "USD", "Payroll dos EUA (empregos)")
-    return ev
-
-
-def montar_eventos(hoje, janela_dias=7, log=print):
-    globais = carregar_globais(hoje, janela_dias, log)
-    ev = globais + eventos_locais(hoje, janela_dias, so_brasil=bool(globais))
-    return ev, bool(globais)
-
-
-# ---------------- mensagem ----------------
-def linhas_do_dia(evs):
-    evs = sorted(evs, key=lambda e: (-e["estrelas"], e["hora"] or "99:99", e["pais"]))
-    out = []
-    for e in evs:
-        hora = f"{e['hora']} " if e["hora"] else ""
-        out.append(f"{'⭐' * e['estrelas']} {hora}{BANDEIRAS.get(e['pais'], '🌐')} {html.escape(e['titulo'])}")
-    return out
-
-
-def montar_mensagens(eventos, hoje, global_ok=True, limite=LIMITE_MSG):
-    cab = (f"<b>📅 Calendário Econômico da Semana</b> — {hoje.strftime('%d/%m/%Y')}\n"
-           "Eventos de 3 a 5 estrelas (⭐⭐⭐⭐⭐ = máximo impacto), horário de Brasília.")
-    if not global_ok:
-        cab += "\n⚠️ Fonte global indisponível: lista reduzida desta vez."
-    rodape = "⚠️ Conteúdo informativo, não é recomendação de investimento."
-    if not eventos:
-        return [cab + "\n\nSem eventos relevantes previstos para os próximos 7 dias.\n\n" + rodape]
-
-    por_dia = {}
-    for e in eventos:
-        por_dia.setdefault(e["dia"], []).append(e)
-
-    blocos = []  # (cabecalho do dia, linhas)
-    for d in sorted(por_dia):
-        cd = f"<b>{DIAS[d.weekday()]}, {d.strftime('%d/%m')}</b>"
-        blocos.append((cd, linhas_do_dia(por_dia[d])))
-
-    msgs, atual = [], cab
-    for cd, linhas in blocos:
-        i, cont = 0, False
-        while i < len(linhas):
-            titulo = cd + (" (cont.)" if cont else "")
-            trecho = [titulo]
-            while i < len(linhas) and len("\n".join(trecho + [linhas[i]])) + 2 + len(atual) <= limite - len(rodape) - 4:
-                trecho.append(linhas[i]); i += 1
-            if len(trecho) == 1:  # nao coube nem uma linha: fecha a mensagem e recomeca
-                if atual == "":
-                    trecho.append(linhas[i]); i += 1
-                else:
-                    msgs.append(atual); atual = ""
-                    continue
-            atual = (atual + "\n\n" if atual else "") + "\n".join(trecho)
-            cont = True
-            if i < len(linhas):
-                msgs.append(atual); atual = ""
-    msgs.append(atual + "\n\n" + rodape)
-    return msgs
-
-
-def enviar_telegram(texto):
-    url = f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage"
-    payload = {"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": texto, "parse_mode": "HTML",
-               "disable_web_page_preview": "true"}
-    resp = requests.post(url, data=payload, timeout=20)
-    if resp.status_code != 200:
-        raise RuntimeError(f"Telegram {resp.status_code}: {resp.text[:300]}")
-
-
-def main():
-    hoje = datetime.now(FUSO).date()
-    eventos, global_ok = montar_eventos(hoje)
-    msgs = montar_mensagens(eventos, hoje, global_ok)
-    for m in msgs:
-        enviar_telegram(m)
-        print(m, "\n---")
-    print(f"{len(msgs)} mensagem(ns) enviada(s); {len(eventos)} evento(s).")
-
-
-if __name__ == "__main__":
-    main()
+            ev.append({"dia
