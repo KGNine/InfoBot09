@@ -9,25 +9,35 @@ FUSO = ZoneInfo("America/Sao_Paulo")
 NY = ZoneInfo("America/New_York")
 LIMITE_MSG = 3800  # Telegram aceita 4096
 
-# Calendario global gratuito (Forex Factory / Fair Economy): EUA, Zona do Euro, Japao, Australia,
-# Reino Unido, Canada, Nova Zelandia, Suica e China. Nao cobre o Brasil (ver EVENTOS BR abaixo).
+# Calendario global gratuito (Forex Factory / Fair Economy).
+# Cobre EUA, Zona do Euro, Japao, Australia, Reino Unido, Canada,
+# Nova Zelandia, Suica e China. Nao cobre o Brasil (ver EVENTOS BR).
 FEEDS_GLOBAIS = [
     "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
     "https://nfs.faireconomy.media/ff_calendar_nextweek.json",
 ]
 
-BANDEIRAS = {"USD": "🇺🇸", "EUR": "🇪🇺", "JPY": "🇯🇵", "AUD": "🇦🇺", "GBP": "🇬🇧", "CAD": "🇨🇦",
-             "NZD": "🇳🇿", "CHF": "🇨🇭", "CNY": "🇨🇳", "BRL": "🇧🇷", "ALL": "🌐"}
-DIAS = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+BANDEIRAS = {
+    "USD": "🇺🇸", "EUR": "🇪🇺", "JPY": "🇯🇵", "AUD": "🇦🇺",
+    "GBP": "🇬🇧", "CAD": "🇨🇦", "NZD": "🇳🇿", "CHF": "🇨🇭",
+    "CNY": "🇨🇳", "BRL": "🇧🇷", "ALL": "🌐",
+}
+DIAS = [
+    "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira",
+    "Sexta-feira", "Sábado", "Domingo",
+]
 
-# Eventos que valem 5 estrelas quando o calendario os marca como alto impacto
-CINCO_ESTRELAS = ["federal funds rate", "fomc statement", "main refinancing rate", "cash rate",
-                  "boj policy rate", "policy rate", "official bank rate", "overnight rate",
-                  "monetary policy", "non-farm", "cpi"]
+# Eventos que valem 5 estrelas quando o calendario os marca como alto
+CINCO_ESTRELAS = [
+    "federal funds rate", "fomc statement", "main refinancing rate",
+    "cash rate", "boj policy rate", "policy rate", "official bank rate",
+    "overnight rate", "monetary policy", "non-farm", "cpi",
+]
 
-# Traducao dos nomes mais comuns (o que nao estiver aqui aparece no original)
+# Traducao dos nomes mais comuns (o resto aparece no original)
 TRADUCOES = [
-    (r"non-farm employment change", "Payroll (empregos fora do setor agrícola)"),
+    (r"non-farm employment change",
+     "Payroll (empregos fora do setor agrícola)"),
     (r"federal funds rate", "Decisão de juros do Fed"),
     (r"fomc meeting minutes", "Ata do FOMC"),
     (r"fomc statement", "Comunicado do FOMC"),
@@ -63,11 +73,13 @@ def traduzir_titulo(t):
 
 
 def estrelas(impacto, titulo):
-    """Calendario so tem 3 niveis. Mapeamento: alto = 4 (ou 5 se for juros, payroll ou CPI),
-    medio = 3, baixo e feriado = 0 (nao divulgar)."""
+    # Calendario so tem 3 niveis.
+    # alto = 4 (5 se for juros, payroll ou CPI), medio = 3,
+    # baixo e feriado = 0 (nao divulgar).
     imp = (impacto or "").lower()
     if imp == "high":
-        return 5 if any(k in titulo.lower() for k in CINCO_ESTRELAS) else 4
+        t = titulo.lower()
+        return 5 if any(k in t for k in CINCO_ESTRELAS) else 4
     if imp == "medium":
         return 3
     return 0
@@ -77,14 +89,16 @@ def carregar_globais(hoje, janela_dias=7, log=print):
     fim = hoje + timedelta(days=janela_dias)
     agora = datetime.now(FUSO)
     vistos, saida = set(), []
+    cab_http = {"User-Agent": "Mozilla/5.0 (L.I.C.A.)"}
     for url in FEEDS_GLOBAIS:
+        nome = url.rsplit("/", 1)[-1]
         try:
-            r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0 (L.I.C.A.)"})
+            r = requests.get(url, timeout=20, headers=cab_http)
             r.raise_for_status()
             dados = r.json()
-            log(f"[Calendario] {url.rsplit('/', 1)[-1]}: {len(dados)} eventos")
+            log(f"[Calendario] {nome}: {len(dados)} eventos")
         except Exception as e:
-            log(f"[Calendario] feed falhou ({url.rsplit('/', 1)[-1]}): {e}")
+            log(f"[Calendario] feed falhou ({nome}): {e}")
             continue
         for e in dados:
             try:
@@ -99,49 +113,21 @@ def carregar_globais(hoje, janela_dias=7, log=print):
                 if not (hoje <= loc.date() < fim):
                     continue
                 if not sem_hora and loc < agora:
-                    continue  # evento que já aconteceu hoje não entra
+                    continue  # evento que ja aconteceu hoje nao entra
                 chave = (loc.isoformat(), e.get("country"), e.get("title"))
                 if chave in vistos:
                     continue
                 vistos.add(chave)
-                saida.append({"dia": loc.date(), "hora": "" if sem_hora else loc.strftime("%H:%M"),
-                              "estrelas": n, "pais": e.get("country", "ALL"),
-                              "titulo": traduzir_titulo(e.get("title", ""))})
+                saida.append(dict(
+                    dia=loc.date(),
+                    hora="" if sem_hora else loc.strftime("%H:%M"),
+                    estrelas=n,
+                    pais=e.get("country", "ALL"),
+                    titulo=traduzir_titulo(e.get("title", "")),
+                ))
             except Exception as ex:
                 log(f"[Calendario] evento ignorado: {ex}")
     return saida
 
 
 # ---------------- EVENTOS BR (e plano B global) ----------------
-# Datas oficiais confirmadas (atualizar 1x por ano, quando cada banco publicar o calendario do ano seguinte)
-BANCOS_CENTRAIS = [
-    ("BRL", "Decisão de juros do Copom (Selic)", [date(2026, 11, 4), date(2026, 12, 9)]),
-    ("USD", "Decisão de juros do Fed (FOMC)", [date(2026, 10, 28), date(2026, 12, 9)]),
-    ("EUR", "Decisão de juros do BCE", [date(2026, 10, 29), date(2026, 12, 17)]),
-    ("GBP", "Decisão de juros do BoE", [date(2026, 11, 5), date(2026, 12, 17)]),
-    ("JPY", "Decisão de juros do BoJ", [date(2026, 12, 17)]),
-]
-
-
-def primeira_sexta(ano, mes):
-    d = date(ano, mes, 1)
-    while d.weekday() != 4:
-        d += timedelta(days=1)
-    return d
-
-
-def proximo_dia_aproximado(hoje, dia_alvo):
-    candidato = date(hoje.year, hoje.month, dia_alvo)
-    if candidato < hoje:
-        candidato = date(hoje.year + (hoje.month == 12), 1 if hoje.month == 12 else hoje.month + 1, dia_alvo)
-    return candidato
-
-
-def eventos_locais(hoje, janela_dias=7, so_brasil=True):
-    """Brasil (o calendario global nao cobre). Se o global falhar, entra tambem a lista dos bancos centrais."""
-    limite = hoje + timedelta(days=janela_dias)
-    ev = []
-
-    def add(d, n, pais, titulo):
-        if hoje <= d < limite:
-            ev.append({"dia
