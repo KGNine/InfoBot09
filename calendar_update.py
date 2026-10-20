@@ -1,99 +1,79 @@
-import os
-import re
-import html
-import requests
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
+import base64
 
-FUSO = ZoneInfo("America/Sao_Paulo")
-NY = ZoneInfo("America/New_York")
-LIMITE_MSG = 3800  # Telegram aceita 4096
-
-# Calendario global gratuito (Forex Factory / Fair Economy).
-# Cobre EUA, Zona do Euro, Japao, Australia, Reino Unido, Canada,
-# Nova Zelandia, Suica e China. Nao cobre o Brasil (ver EVENTOS BR).
-FEEDS_GLOBAIS = [
-    "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-    "https://nfs.faireconomy.media/ff_calendar_nextweek.json",
-]
-
-BANDEIRAS = {
-    "USD": "🇺🇸", "EUR": "🇪🇺", "JPY": "🇯🇵", "AUD": "🇦🇺",
-    "GBP": "🇬🇧", "CAD": "🇨🇦", "NZD": "🇳🇿", "CHF": "🇨🇭",
-    "CNY": "🇨🇳", "BRL": "🇧🇷", "ALL": "🌐",
-}
-DIAS = [
-    "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira",
-    "Sexta-feira", "Sábado", "Domingo",
-]
-
-# Eventos que valem 5 estrelas quando o calendario os marca como alto
-CINCO_ESTRELAS = [
-    "federal funds rate", "fomc statement", "main refinancing rate",
-    "cash rate", "boj policy rate", "policy rate", "official bank rate",
-    "overnight rate", "monetary policy", "non-farm", "cpi",
-]
-
-# Traducao dos nomes mais comuns (o resto aparece no original)
-TRADUCOES = [
-    (r"non-farm employment change",
-     "Payroll (empregos fora do setor agrícola)"),
-    (r"federal funds rate", "Decisão de juros do Fed"),
-    (r"fomc meeting minutes", "Ata do FOMC"),
-    (r"fomc statement", "Comunicado do FOMC"),
-    (r"fomc press conference", "Coletiva do presidente do Fed"),
-    (r"main refinancing rate", "Decisão de juros do BCE"),
-    (r"ecb press conference", "Coletiva do BCE"),
-    (r"boj policy rate", "Decisão de juros do BoJ"),
-    (r"boj press conference", "Coletiva do BoJ"),
-    (r"official bank rate", "Decisão de juros do BoE"),
-    (r"^cash rate", "Decisão de juros do RBA"),
-    (r"rba rate statement", "Comunicado do RBA"),
-    (r"unemployment rate", "Taxa de desemprego"),
-    (r"core cpi", "CPI núcleo (inflação)"),
-    (r"\bcpi\b", "CPI (inflação)"),
-    (r"core ppi|\bppi\b", "PPI (preços ao produtor)"),
-    (r"retail sales", "Vendas no varejo"),
-    (r"\bgdp\b", "PIB"),
-    (r"manufacturing pmi", "PMI industrial"),
-    (r"services pmi", "PMI de serviços"),
-    (r"trade balance", "Balança comercial"),
-    (r"employment change", "Variação de empregos"),
-    (r"speaks", "discursa"),
-    (r"\by/y\b", "a/a"),
-    (r"\bm/m\b", "m/m"),
-]
-
-
-def traduzir_titulo(t):
-    out = t
-    for padrao, pt in TRADUCOES:
-        out = re.sub(padrao, pt, out, flags=re.I)
-    return out
-
-
-def estrelas(impacto, titulo):
-    # Calendario so tem 3 niveis.
-    # alto = 4 (5 se for juros, payroll ou CPI), medio = 3,
-    # baixo e feriado = 0 (nao divulgar).
-    imp = (impacto or "").lower()
-    if imp == "high":
-        t = titulo.lower()
-        return 5 if any(k in t for k in CINCO_ESTRELAS) else 4
-    if imp == "medium":
-        return 3
-    return 0
-
-
-def carregar_globais(hoje, janela_dias=7, log=print):
-    fim = hoje + timedelta(days=janela_dias)
-    agora = datetime.now(FUSO)
-    vistos, saida = set(), []
-    cab_http = {"User-Agent": "Mozilla/5.0 (L.I.C.A.)"}
-    for url in FEEDS_GLOBAIS:
-        nome = url.rsplit("/", 1)[-1]
-        try:
-            r = requests.get(url, timeout=20, headers=cab_http)
-            r.raise_for_status()
-            dados = r.json()
-            log(f"[Calendario] {nome}: {len(dados)} eventos")
+DADOS = """
+aW1wb3J0IG9zCmltcG9ydCByZQppbXBvcnQgaHRtbAppbXBvcnQgcmVxdWVzdHMKZnJvbSBk
+YXRldGltZSBpbXBvcnQgZGF0ZSwgZGF0ZXRpbWUsIHRpbWVkZWx0YQpmcm9tIHpvbmVpbmZv
+IGltcG9ydCBab25lSW5mbwoKRlVTTyA9IFpvbmVJbmZvKCJBbWVyaWNhL1Nhb19QYXVsbyIp
+Ck5ZID0gWm9uZUluZm8oIkFtZXJpY2EvTmV3X1lvcmsiKQpMSU1JVEVfTVNHID0gMzgwMCAg
+IyBUZWxlZ3JhbSBhY2VpdGEgNDA5NgoKIyBDYWxlbmRhcmlvIGdsb2JhbCBncmF0dWl0byAo
+Rm9yZXggRmFjdG9yeSAvIEZhaXIgRWNvbm9teSkuCiMgQ29icmUgRVVBLCBab25hIGRvIEV1
+cm8sIEphcGFvLCBBdXN0cmFsaWEsIFJlaW5vIFVuaWRvLCBDYW5hZGEsCiMgTm92YSBaZWxh
+bmRpYSwgU3VpY2EgZSBDaGluYS4gTmFvIGNvYnJlIG8gQnJhc2lsICh2ZXIgRVZFTlRPUyBC
+UikuCkZFRURTX0dMT0JBSVMgPSBbCiAgICAiaHR0cHM6Ly9uZnMuZmFpcmVjb25vbXkubWVk
+aWEvZmZfY2FsZW5kYXJfdGhpc3dlZWsuanNvbiIsCiAgICAiaHR0cHM6Ly9uZnMuZmFpcmVj
+b25vbXkubWVkaWEvZmZfY2FsZW5kYXJfbmV4dHdlZWsuanNvbiIsCl0KCkJBTkRFSVJBUyA9
+IHsKICAgICJVU0QiOiAi8J+HuvCfh7giLCAiRVVSIjogIvCfh6rwn4e6IiwgIkpQWSI6ICLw
+n4ev8J+HtSIsICJBVUQiOiAi8J+HpvCfh7oiLAogICAgIkdCUCI6ICLwn4es8J+HpyIsICJD
+QUQiOiAi8J+HqPCfh6YiLCAiTlpEIjogIvCfh7Pwn4e/IiwgIkNIRiI6ICLwn4eo8J+HrSIs
+CiAgICAiQ05ZIjogIvCfh6jwn4ezIiwgIkJSTCI6ICLwn4en8J+HtyIsICJBTEwiOiAi8J+M
+kCIsCn0KRElBUyA9IFsKICAgICJTZWd1bmRhLWZlaXJhIiwgIlRlcsOnYS1mZWlyYSIsICJR
+dWFydGEtZmVpcmEiLCAiUXVpbnRhLWZlaXJhIiwKICAgICJTZXh0YS1mZWlyYSIsICJTw6Fi
+YWRvIiwgIkRvbWluZ28iLApdCgojIEV2ZW50b3MgcXVlIHZhbGVtIDUgZXN0cmVsYXMgcXVh
+bmRvIG8gY2FsZW5kYXJpbyBvcyBtYXJjYSBjb21vIGFsdG8KQ0lOQ09fRVNUUkVMQVMgPSBb
+CiAgICAiZmVkZXJhbCBmdW5kcyByYXRlIiwgImZvbWMgc3RhdGVtZW50IiwgIm1haW4gcmVm
+aW5hbmNpbmcgcmF0ZSIsCiAgICAiY2FzaCByYXRlIiwgImJvaiBwb2xpY3kgcmF0ZSIsICJw
+b2xpY3kgcmF0ZSIsICJvZmZpY2lhbCBiYW5rIHJhdGUiLAogICAgIm92ZXJuaWdodCByYXRl
+IiwgIm1vbmV0YXJ5IHBvbGljeSIsICJub24tZmFybSIsICJjcGkiLApdCgojIFRyYWR1Y2Fv
+IGRvcyBub21lcyBtYWlzIGNvbXVucyAobyByZXN0byBhcGFyZWNlIG5vIG9yaWdpbmFsKQpU
+UkFEVUNPRVMgPSBbCiAgICAociJub24tZmFybSBlbXBsb3ltZW50IGNoYW5nZSIsCiAgICAg
+IlBheXJvbGwgKGVtcHJlZ29zIGZvcmEgZG8gc2V0b3IgYWdyw61jb2xhKSIpLAogICAgKHIi
+ZmVkZXJhbCBmdW5kcyByYXRlIiwgIkRlY2lzw6NvIGRlIGp1cm9zIGRvIEZlZCIpLAogICAg
+KHIiZm9tYyBtZWV0aW5nIG1pbnV0ZXMiLCAiQXRhIGRvIEZPTUMiKSwKICAgIChyImZvbWMg
+c3RhdGVtZW50IiwgIkNvbXVuaWNhZG8gZG8gRk9NQyIpLAogICAgKHIiZm9tYyBwcmVzcyBj
+b25mZXJlbmNlIiwgIkNvbGV0aXZhIGRvIHByZXNpZGVudGUgZG8gRmVkIiksCiAgICAociJt
+YWluIHJlZmluYW5jaW5nIHJhdGUiLCAiRGVjaXPDo28gZGUganVyb3MgZG8gQkNFIiksCiAg
+ICAociJlY2IgcHJlc3MgY29uZmVyZW5jZSIsICJDb2xldGl2YSBkbyBCQ0UiKSwKICAgIChy
+ImJvaiBwb2xpY3kgcmF0ZSIsICJEZWNpc8OjbyBkZSBqdXJvcyBkbyBCb0oiKSwKICAgIChy
+ImJvaiBwcmVzcyBjb25mZXJlbmNlIiwgIkNvbGV0aXZhIGRvIEJvSiIpLAogICAgKHIib2Zm
+aWNpYWwgYmFuayByYXRlIiwgIkRlY2lzw6NvIGRlIGp1cm9zIGRvIEJvRSIpLAogICAgKHIi
+XmNhc2ggcmF0ZSIsICJEZWNpc8OjbyBkZSBqdXJvcyBkbyBSQkEiKSwKICAgIChyInJiYSBy
+YXRlIHN0YXRlbWVudCIsICJDb211bmljYWRvIGRvIFJCQSIpLAogICAgKHIidW5lbXBsb3lt
+ZW50IHJhdGUiLCAiVGF4YSBkZSBkZXNlbXByZWdvIiksCiAgICAociJjb3JlIGNwaSIsICJD
+UEkgbsO6Y2xlbyAoaW5mbGHDp8OjbykiKSwKICAgIChyIlxiY3BpXGIiLCAiQ1BJIChpbmZs
+YcOnw6NvKSIpLAogICAgKHIiY29yZSBwcGl8XGJwcGlcYiIsICJQUEkgKHByZcOnb3MgYW8g
+cHJvZHV0b3IpIiksCiAgICAociJyZXRhaWwgc2FsZXMiLCAiVmVuZGFzIG5vIHZhcmVqbyIp
+LAogICAgKHIiXGJnZHBcYiIsICJQSUIiKSwKICAgIChyIm1hbnVmYWN0dXJpbmcgcG1pIiwg
+IlBNSSBpbmR1c3RyaWFsIiksCiAgICAociJzZXJ2aWNlcyBwbWkiLCAiUE1JIGRlIHNlcnZp
+w6dvcyIpLAogICAgKHIidHJhZGUgYmFsYW5jZSIsICJCYWxhbsOnYSBjb21lcmNpYWwiKSwK
+ICAgIChyImVtcGxveW1lbnQgY2hhbmdlIiwgIlZhcmlhw6fDo28gZGUgZW1wcmVnb3MiKSwK
+ICAgIChyInNwZWFrcyIsICJkaXNjdXJzYSIpLAogICAgKHIiXGJ5L3lcYiIsICJhL2EiKSwK
+ICAgIChyIlxibS9tXGIiLCAibS9tIiksCl0KCgpkZWYgdHJhZHV6aXJfdGl0dWxvKHQpOgog
+ICAgb3V0ID0gdAogICAgZm9yIHBhZHJhbywgcHQgaW4gVFJBRFVDT0VTOgogICAgICAgIG91
+dCA9IHJlLnN1YihwYWRyYW8sIHB0LCBvdXQsIGZsYWdzPXJlLkkpCiAgICByZXR1cm4gb3V0
+CgoKZGVmIGVzdHJlbGFzKGltcGFjdG8sIHRpdHVsbyk6CiAgICAjIENhbGVuZGFyaW8gc28g
+dGVtIDMgbml2ZWlzLgogICAgIyBhbHRvID0gNCAoNSBzZSBmb3IganVyb3MsIHBheXJvbGwg
+b3UgQ1BJKSwgbWVkaW8gPSAzLAogICAgIyBiYWl4byBlIGZlcmlhZG8gPSAwIChuYW8gZGl2
+dWxnYXIpLgogICAgaW1wID0gKGltcGFjdG8gb3IgIiIpLmxvd2VyKCkKICAgIGlmIGltcCA9
+PSAiaGlnaCI6CiAgICAgICAgdCA9IHRpdHVsby5sb3dlcigpCiAgICAgICAgcmV0dXJuIDUg
+aWYgYW55KGsgaW4gdCBmb3IgayBpbiBDSU5DT19FU1RSRUxBUykgZWxzZSA0CiAgICBpZiBp
+bXAgPT0gIm1lZGl1bSI6CiAgICAgICAgcmV0dXJuIDMKICAgIHJldHVybiAwCgoKZGVmIGNh
+cnJlZ2FyX2dsb2JhaXMoaG9qZSwgamFuZWxhX2RpYXM9NywgbG9nPXByaW50KToKICAgIGZp
+bSA9IGhvamUgKyB0aW1lZGVsdGEoZGF5cz1qYW5lbGFfZGlhcykKICAgIGFnb3JhID0gZGF0
+ZXRpbWUubm93KEZVU08pCiAgICB2aXN0b3MsIHNhaWRhID0gc2V0KCksIFtdCiAgICBjYWJf
+aHR0cCA9IHsiVXNlci1BZ2VudCI6ICJNb3ppbGxhLzUuMCAoTC5JLkMuQS4pIn0KICAgIGZv
+ciB1cmwgaW4gRkVFRFNfR0xPQkFJUzoKICAgICAgICBub21lID0gdXJsLnJzcGxpdCgiLyIs
+IDEpWy0xXQogICAgICAgIHRyeToKICAgICAgICAgICAgciA9IHJlcXVlc3RzLmdldCh1cmws
+IHRpbWVvdXQ9MjAsIGhlYWRlcnM9Y2FiX2h0dHApCiAgICAgICAgICAgIHIucmFpc2VfZm9y
+X3N0YXR1cygpCiAgICAgICAgICAgIGRhZG9zID0gci5qc29uKCkKICAgICAgICAgICAgbG9n
+KGYiW0NhbGVuZGFyaW9dIHtub21lfToge2xlbihkYWRvcyl9IGV2ZW50b3MiKQogICAgICAg
+IGV4Y2VwdCBFeGNlcHRpb24gYXMgZToKICAgICAgICAgICAgbG9nKGYiW0NhbGVuZGFyaW9d
+IGZlZWQgZmFsaG91ICh7bm9tZX0pOiB7ZX0iKQogICAgICAgICAgICBjb250aW51ZQogICAg
+ICAgIGZvciBlIGluIGRhZG9zOgogICAgICAgICAgICB0cnk6CiAgICAgICAgICAgICAgICBu
+ID0gZXN0cmVsYXMoZS5nZXQoImltcGFjdCIpLCBlLmdldCgidGl0bGUiLCAiIikpCiAgICAg
+ICAgICAgICAgICBpZiBuIDwgMzoKICAgICAgICAgICAgICAgICAgICBjb250aW51ZQogICAg
+ICAgICAgICAgICAgZHQgPSBkYXRldGltZS5mcm9taXNvZm9ybWF0KGVbImRhdGUiXSkKICAg
+ICAgICAgICAgICAgIGlmIGR0LnR6aW5mbyBpcyBOb25lOgogICAgICAgICAgICAgICAgICAg
+IGR0ID0gZHQucmVwbGFjZSh0emluZm89TlkpCiAgICAgICAgICAgICAgICBzZW1faG9yYSA9
+IChkdC5ob3VyLCBkdC5taW51dGUpID09ICgwLCAwKQogICAgICAgICAgICAgICAgbG9jID0g
+ZHQuYXN0aW1lem9uZShGVVNPKQogICAgICAgICAgICAgICAgaWYgbm90IChob2plIDw9IGxv
+Yy5kYXRlKCkgPCB
